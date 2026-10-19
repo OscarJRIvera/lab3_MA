@@ -44,20 +44,24 @@ COL_AGUA = productos.index("Agua")
 popularidad = X.sum(axis=0)
 
 # TODO 1: la tabla de similitudes producto × producto (con la diagonal en 0), calculada UNA vez
-S_it = ...   # <-- reemplacen esto (cosine_similarity entre las columnas de X)
+S_it = cosine_similarity(X.T)
+np.fill_diagonal(S_it, 0)
 
 
-def puntajes(metodo, x_vec, K):
+def puntajes(metodo, x_vec, K, cliente_idx=None):
     """Puntajes de los 29 productos para UN cliente (x_vec = su vector de 0/1)."""
     if metodo == "Popularidad":
         return popularidad.astype(float)
     if metodo == "Filtrado por ítem":
         # TODO 2: suma de las similitudes de cada producto con lo que el cliente ya compró
-        return ...   # <-- reemplacen esto
+        return x_vec @ S_it
     # TODO 3: filtrado por cliente: similitud del cliente con TODOS los demás, sus K vecinos más parecidos
     #         y la suma de sus compras ponderada por esa similitud
     sims = cosine_similarity(x_vec[None, :], X)[0]
-    return ...       # <-- reemplacen esto
+    if cliente_idx is not None:
+        sims[cliente_idx] = 0  # un cliente no puede ser su propio vecino
+    vecinos = np.argsort(sims)[-K:]
+    return sims[vecinos] @ X[vecinos]
 
 
 def top3(scores, x_vec):
@@ -68,32 +72,79 @@ def top3(scores, x_vec):
 
 # --- Título ---
 st.title("☕ Recomendador de productos")
-st.caption("TODO: escriban aquí una frase sobre qué decisión de negocio ayuda a tomar esta app.")
+st.caption("Explora qué productos recomendar a cada cliente y compara cuál método acierta más y ofrece mayor variedad.")
 
 # TODO 4: barra lateral con los controles interactivos (mínimo UNO): un selector del método
 #         (st.selectbox) y un slider con el número de vecinos K (st.slider)
 with st.sidebar:
     st.header("Parámetros")
-    metodo = ...     # <-- reemplacen esto
-    K = ...          # <-- reemplacen esto
+    metodo = st.selectbox("Método", ["Popularidad", "Filtrado por ítem", "Filtrado por cliente"])
+    K = st.slider("Número de vecinos (K)", 5, 100, 30, 5)
 
 tab1, tab2 = st.tabs(["Recomendar", "Comparar métodos"])
 
 with tab1:
-    cid = st.number_input("ID de cliente", min_value=int(ids.min()), max_value=int(ids.max()), value=14, step=1)
+    cid = st.selectbox("ID de cliente", options=[int(i) for i in ids], index=int(np.where(ids == 14)[0][0]) if 14 in ids else 0)
     fila = int(np.where(ids == cid)[0][0])
     x_vec = X[fila].copy()
     st.write("Ya compró:", [productos[j] for j in np.where(x_vec > 0)[0]])
 
-    # TODO 5: muestren las 3 recomendaciones con su puntaje y, para cada una, el "porque"
-    #         - por ítem: "porque compró X (similitud 0.87)"
-    #         - por cliente: "N de sus K vecinos más parecidos lo compraron"
-    #         - popularidad: "es de lo más comprado"
-    #         (y qué hacen con un cliente SIN historial: los métodos colaborativos dan puntaje 0)
+    if not x_vec.any() and metodo != "Popularidad":
+        st.info("Este cliente no tiene historial de compras. Se usa popularidad como respaldo.")
+        metodo_efectivo = "Popularidad"
+    else:
+        metodo_efectivo = metodo
+
+    scores = puntajes(metodo_efectivo, x_vec, K, fila)
+    recomendaciones = top3(scores, x_vec)
+
+    if metodo_efectivo == "Filtrado por cliente":
+        similitudes = cosine_similarity(x_vec[None, :], X)[0]
+        similitudes[fila] = 0
+        vecinos = np.argsort(similitudes)[-K:]
+
+    st.subheader("Tus 3 recomendaciones")
+    for posicion, j in enumerate(recomendaciones, 1):
+        if metodo_efectivo == "Popularidad":
+            razon = "Es uno de los productos más comprados por los clientes."
+        elif metodo_efectivo == "Filtrado por ítem":
+            comprados = np.where(x_vec > 0)[0]
+            relacionado = comprados[np.argmax(S_it[comprados, j])]
+            razon = f"Porque compró {productos[relacionado]} (similitud {S_it[relacionado, j]:.2f})."
+        else:
+            cuantos = int(X[vecinos, j].sum())
+            razon = f"{cuantos} de sus {K} vecinos más parecidos compraron este producto."
+        st.write(f"**{posicion}. {productos[j]}** — Puntaje: {scores[j]:.2f}")
+        st.write(razon)
 
 with tab2:
     # TODO 6: tabla de comparación (hit rate@3 y cobertura de cada método) calculada sobre los clientes del grupo
     #         CONTROL que probaron algo nuevo (NUEVO.sum(axis=1) > 0 y es_control), con al menos un control
     #         interactivo (por ejemplo, un slider con cuántos clientes evaluar o el K del filtrado por cliente).
     #         Pista: es la misma lógica de hit_rate_at_k del notebook.
-    st.info("Reemplacen cada TODO con su propio código. Revisen el notebook del laboratorio para la lógica exacta de cada pieza.")
+    elegibles = np.where(es_control & (NUEVO.sum(axis=1) > 0))[0]
+    if len(elegibles) == 0:
+        st.warning("No hay clientes elegibles del grupo control para evaluar.")
+    else:
+        max_clientes = len(elegibles)
+        cantidad = st.slider("Clientes de control a evaluar", 1, max_clientes,
+                             min(200, max_clientes), 1)
+        seleccion = elegibles[:cantidad]
+        resultados = []
+        for nombre in ["Popularidad", "Filtrado por ítem", "Filtrado por cliente"]:
+            aciertos = []
+            productos_recomendados = set()
+            for i in seleccion:
+                punt = puntajes(nombre, X[i], K, int(i))
+                recomendaciones = top3(punt, X[i])
+                aciertos.append(bool(NUEVO[i, recomendaciones].any()))
+                productos_recomendados.update(recomendaciones.tolist())
+            resultados.append({
+                "Método": nombre,
+                "Hit rate@3 (%)": round(100 * np.mean(aciertos), 2),
+                "Cobertura (de 28)": len(productos_recomendados),
+            })
+        st.dataframe(pd.DataFrame(resultados).set_index("Método"), use_container_width=True)
+        st.caption("El hit rate indica qué porcentaje compró al menos uno de los 3 productos recomendados. "
+                   "La cobertura cuenta cuántos productos diferentes se recomendaron. "
+                   "Se evalúan únicamente clientes del grupo control que probaron algo nuevo.")
