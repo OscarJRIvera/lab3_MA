@@ -8,6 +8,8 @@ elegir un cliente y un método, ver sus 3 recomendaciones con el "porque", y com
 
 Correr con:  streamlit run streamlit_starter.py
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -22,11 +24,12 @@ GRIS = "#9A988E"
 
 @st.cache_data
 def cargar():
-    catalogo = pd.read_csv("data/catalogo.csv")
-    hist = pd.read_csv("data/ordenes_historial.csv")
-    hold = pd.read_csv("data/ordenes_holdout.csv")
-    exp = pd.read_csv("data/experimento.csv")
-    clientes = pd.read_csv("data/clientes.csv")
+    data_path = Path(__file__).resolve().parent / "data"
+    catalogo = pd.read_csv(data_path / "catalogo.csv")
+    hist = pd.read_csv(data_path / "ordenes_historial.csv")
+    hold = pd.read_csv(data_path / "ordenes_holdout.csv")
+    exp = pd.read_csv(data_path / "experimento.csv")
+    clientes = pd.read_csv(data_path / "clientes.csv")
     productos = list(catalogo["item"])
     M = (pd.crosstab(hist["customer_id"], hist["item"]) > 0).astype(int).reindex(
         index=clientes["customer_id"], columns=productos, fill_value=0)
