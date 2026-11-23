@@ -2,3 +2,4 @@ resuelto*
 *.zip
 .env
 .cursor
+.venv
